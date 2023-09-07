@@ -86,7 +86,8 @@ def visualize_64000(target):
     print(f"Saved in {save_path}")
 
 if __name__ == "__main__":
-    visualize_1000()
     target_list = ['train_loss', 'test_loss', 'train_acc', 'test_acc']
-    for target in target_list:
-        visualize_64000(target)
+    # visualize_1000()
+    # for target in target_list:
+    #     visualize_64000(target)
+    

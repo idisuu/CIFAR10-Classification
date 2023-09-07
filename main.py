@@ -1,6 +1,5 @@
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
 import torch.optim as optim
 from torch.utils.data import DataLoader
 
@@ -9,94 +8,12 @@ from torchvision import transforms
 
 import numpy as np
 
+import os
 import json
 from tqdm.notebook import tqdm
-import matplotlib.pyplot as plt
 
-class BasicBlock(nn.Module):
-    def __init__(self, in_planes, planes, stride, use_residual):
-        super(BasicBlock, self).__init__()
+from model.resnet import ResNetCifar10, BasicBlock, Bottleneck, PreactivationBlock, ResNeXtBlock
 
-        self.use_residual = use_residual
-        
-        self.conv1 = nn.Conv2d(in_planes, planes, kernel_size=3, stride=stride, padding=1)
-        self.bn1 = nn.BatchNorm2d(planes)
-
-        self.conv2 = nn.Conv2d(planes, planes, kernel_size=3, padding=1)
-        self.bn2 = nn.BatchNorm2d(planes)
-
-        self.relu = nn.ReLU()
-
-        self.shortcut = None
-        if stride != 1 or (in_planes != planes):
-            self.shortcut = nn.Sequential(
-                nn.Conv2d(in_planes, planes, kernel_size=1, stride=stride, bias=False),
-                nn.BatchNorm2d(planes)
-            )
-
-    def forward(self, x):
-        identity = x
-
-        out = self.conv1(x)
-        out = self.bn1(out)
-        out = self.relu(out)
-
-        out = self.conv2(out)
-        out = self.bn2(out)
-
-        if self.shortcut:
-            identity = self.shortcut(identity)
-
-        if self.use_residual:
-            out += identity
-        out = self.relu(out)
-
-        return out
-
-class ResNetCifar10(nn.Module):
-    def __init__(
-        self,
-        Block,
-        num_layer: int,
-        num_classes: int,
-        use_residual: bool,
-    ):
-        super(ResNetCifar10, self).__init__()        
-        self.block = Block
-        self.use_residual = use_residual
-
-        self.conv1 = nn.Conv2d(3, 16, kernel_size=3, padding=1)
-        self.layer1 = self._make_layer(16, 16, num_layer, 1)
-        self.layer2 = self._make_layer(16, 32, num_layer, 2)
-        self.layer3 = self._make_layer(32, 64, num_layer, 2)
-        self.avgpool = nn.AdaptiveAvgPool2d((1,1))
-        self.linear = nn.Linear(64, num_classes)
-
-        self.relu = nn.ReLU()
-
-    def forward(self, x):
-        out = self.conv1(x)
-        out = self.layer1(out)
-        out = self.layer2(out)
-        out = self.layer3(out)
-        out = self.avgpool(out)
-        out = self.linear(out.view(out.shape[0], -1))
-        return out
-
-    def _make_layer(self, in_planes, planes, num_layer, stride):
-        layers = []
-        layers.append(
-            self.block(in_planes, planes, stride, use_residual=self.use_residual)
-        )
-
-        for _ in range(1, num_layer):
-            layers.append(
-                self.block(
-                    planes, planes, stride=1, use_residual=self.use_residual
-                )
-            )
-        
-        return nn.Sequential(*layers)
 
 def train():
     optimizer = optim.SGD(model.parameters(), lr=0.1, momentum=0.9, weight_decay=0.0001)
@@ -172,38 +89,62 @@ def train():
         'test_acc': test_acc_list
     }
 
-train_transforms = transforms.Compose([
-    transforms.RandomCrop(32, padding=4),
-    transforms.RandomHorizontalFlip(),
-    transforms.ToTensor(),
-])
-test_transfomrs = transforms.Compose([
-    transforms.ToTensor()
-])
 
-root ="./data"
-train_dataset = torchvision.datasets.CIFAR10(root, train=True, transform=train_transforms, download=True)
-test_dataset =  torchvision.datasets.CIFAR10(root, train=False, transform=test_transfomrs, download=True)
+block_to_model_name_dict = {
+    'BasicBlock': "ResNet",
+    "Bottleneck": "ResNet-Bottleneck",
+    "PreactivationBlock": "ResNet-V2",
+    "ResNeXtBlock": "ResNext"
+}
 
-batch_size = 256
-train_loader = DataLoader(train_dataset, batch_size=batch_size)
-test_loader = DataLoader(test_dataset, batch_size=batch_size)
+if __name__ == "__main__":    
+    train_transforms = transforms.Compose([
+        transforms.RandomCrop(32, padding=4),
+        transforms.RandomHorizontalFlip(),
+        transforms.ToTensor(),
+        transforms.Normalize((0.485, 0.456, 0.406), (0.229, 0.224, 0.225)),
+    ])
+    test_transfomrs = transforms.Compose([
+        transforms.ToTensor(),
+        transforms.Normalize((0.485, 0.456, 0.406), (0.229, 0.224, 0.225)),
+    ])
+    
+    root ="./data"
+    train_dataset = torchvision.datasets.CIFAR10(root, train=True, transform=train_transforms, download=True)
+    test_dataset =  torchvision.datasets.CIFAR10(root, train=False, transform=test_transfomrs, download=True)
+    
+    batch_size = 256
+    train_loader = DataLoader(train_dataset, batch_size=batch_size)
+    test_loader = DataLoader(test_dataset, batch_size=batch_size)
+    
+    num_classes = 10
+    
+    max_iteration = 64000
+    validation_duration = 100
+    iteration_down_point = [32000, 48000]
+    channel_list = [
+        (64, 64),
+        (64, 64),
+        (64, 64)
+    ]
+    save_folder = "./result/block_evaluation/"
+    
+    if not os.path.exists(save_folder):
+        os.makedirs(save_folder)
+        print(f"{save_folder}가 생성되었습니다")
 
-Block = BasicBlock
-num_classes = 10
-
-max_iteration = 64000
-validation_duration = 100
-iteration_down_point = [32000, 48000]
-
-repetition = [3, 9]
-use_residual_list = [True, False]
-for num_layer in tqdm(repetition):
-    for use_residual in use_residual_list:
-        model_name = f"ResNet-{num_layer*6+2}-{use_residual}"
-        
-        model = ResNetCifar10(Block, num_layer, num_classes, use_residual)
-        model.cuda()
-        result = train()
-        with open(f"./result/{model_name}.json", 'w') as f:
-            json.dump(result, f)        
+    #block_list = [BasicBlock, Bottleneck, PreactivationBlock, ResNeXtBlock]
+    block_list = [BasicBlock, PreactivationBlock]
+    repetition = [18]
+    use_residual_list = [True]
+    
+    for block in block_list:
+        for num_layer in repetition:
+            for use_residual in use_residual_list:
+                model_name = block_to_model_name_dict[block.__name__] + f"_blocks_per_layer_{num_layer}"
+                
+                model = ResNetCifar10(block, num_layer, num_classes, use_residual, channel_list)
+                model.cuda()
+                result = train()
+                with open(f"{save_folder}{model_name}.json", 'w') as f:
+                    json.dump(result, f)        
