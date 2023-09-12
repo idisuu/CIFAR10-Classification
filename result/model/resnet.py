@@ -4,10 +4,20 @@ import torch.nn.functional as F
 
 from typing import List
 
+# From https://github.com/akamaster/pytorch_resnet_cifar10/blob/master/resnet.py
+class LambdaLayer(nn.Module):
+    def __init__(self, lambd):
+        super(LambdaLayer, self).__init__()
+        self.lambd = lambd
+
+    def forward(self, x):
+        return self.lambd(x)
+
+
 class BasicBlock(nn.Module):
     expansion = 1
     preactivation = False
-    def __init__(self, in_planes, planes, stride, use_residual):
+    def __init__(self, in_planes, planes, stride, use_residual, option="A"):
         super(BasicBlock, self).__init__()
 
         self.use_residual = use_residual
@@ -22,10 +32,18 @@ class BasicBlock(nn.Module):
 
         self.shortcut = None
         if stride != 1 or (in_planes != planes):
-            self.shortcut = nn.Sequential(
-                nn.Conv2d(in_planes, planes, kernel_size=1, stride=stride, bias=False),
-                nn.BatchNorm2d(planes)
-            )
+            if option == 'A':
+                """
+                For CIFAR10 ResNet paper uses option A.
+                From https://github.com/akamaster/pytorch_resnet_cifar10/blob/master/resnet.py
+                """
+                self.shortcut = LambdaLayer(lambda x:
+                                            F.pad(x[:, :, ::2, ::2], (0, 0, 0, 0, planes//4, planes//4), "constant", 0))
+            elif option == 'B':
+                self.shortcut = nn.Sequential(
+                    nn.Conv2d(in_planes, planes, kernel_size=1, stride=stride, bias=False),
+                    nn.BatchNorm2d(planes)
+                )
 
     def forward(self, x):
         identity = x
@@ -73,7 +91,6 @@ class Bottleneck(nn.Module):
             )
 
     def forward(self, x):
-        print_mode = False
         identity = x
         
         out = self.conv1(x)
@@ -223,11 +240,11 @@ class ResNetCifar10(nn.Module):
         
         # weight 초기화
         for m in self.modules():
-            if isinstance(m, nn.Conv2d):
+            if isinstance(m, nn.Conv2d) or isinstance(m, nn.Conv2d):
                 nn.init.kaiming_normal_(m.weight, mode="fan_in", nonlinearity="relu")
-            elif isinstance(m, (nn.BatchNorm2d, nn.GroupNorm)):
-                nn.init.constant_(m.weight, 1)
-                nn.init.constant_(m.bias, 0)
+#             elif isinstance(m, (nn.BatchNorm2d, nn.GroupNorm)):
+#                 nn.init.constant_(m.weight, 1)
+#                 nn.init.constant_(m.bias, 0)
 
     def forward(self, x):
         out = self.conv1(x)
