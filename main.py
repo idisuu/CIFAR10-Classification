@@ -161,9 +161,9 @@ if __name__ == "__main__":
     train_sampler = DistributedSampler(dataset=train_dataset, shuffle=True)
     
     batch_size = 256
-    num_workers = 0
-    train_loader = DataLoader(train_dataset, batch_size=batch_size, num_workers=num_workers, shuffle=False, sampler=train_sampler, pin_memory=True)
-    test_loader = DataLoader(test_dataset, batch_size=batch_size, num_workers=num_workers, shuffle=True, pin_memory=True)
+    num_workers = 4
+    train_loader = DataLoader(train_dataset, batch_size=batch_size, num_workers=num_workers, shuffle=False, sampler=train_sampler, pin_memory=False)
+    test_loader = DataLoader(test_dataset, batch_size=batch_size, num_workers=num_workers, shuffle=True, pin_memory=False)
     
     num_classes = 10
     
