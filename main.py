@@ -15,6 +15,7 @@ import argparse
 from tqdm import tqdm
 
 from model.resnet import ResNetCifar10, BasicBlock, Bottleneck, PreactivationBlock, ResNeXtBlock
+from model.mobilenet import MobileNetV1
 
 import torch.distributed as dist
 import torch.multiprocessing as mp
@@ -22,14 +23,22 @@ from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.utils.data.distributed import DistributedSampler
 
 
-def train():
+def train(model):
     #dist.init_process_group("nccl")
-    rank = dist.get_rank()
-    print(f"Start running basic DDP example on rank {rank}.")
-    
-    device_id = rank % torch.cuda.device_count()
-    model  = ResNetCifar10(block, num_layer, num_classes, use_residual, channel_list).to(device_id)
-    ddp_model = DDP(model, device_ids=[device_id], find_unused_parameters=False)    
+    if use_ddp:
+        rank = dist.get_rank()
+        print(f"Start running basic DDP example on rank {rank}.")    
+        device_id = rank % torch.cuda.device_count()
+    else:
+        device_id = "cuda:0"
+        
+    model.to(device_id)
+
+    if use_ddp:
+        ddp_model = DDP(model, device_ids=[device_id], find_unused_parameters=False)  
+    else:
+        ddp_model = model
+        rank = 0
     
     optimizer = optim.SGD(model.parameters(), lr=0.1, momentum=0.9, weight_decay=0.0001)
     loss_fct = nn.CrossEntropyLoss()
@@ -108,7 +117,7 @@ def train():
                     
                 end_time = time.time()               
                 
-                if rank == 0:
+                if (use_ddp and rank == 0) or (not use_ddp):
                     print()
                     print(f"{model_name} ==> Iteration {iteration}: train-loss - {train_loss_list[-1]}")
                     print(f"{model_name} ==> Iteration {iteration}: tess-acc - {test_acc_list[-1]}")
@@ -119,7 +128,8 @@ def train():
                     
         if iteration >= max_iteration:
             break
-    dist.destroy_process_group()    
+    if use_ddp:
+        dist.destroy_process_group()    
     return {
         'train_loss': train_loss_list,
         'train_acc': train_acc_list,
@@ -136,7 +146,9 @@ block_to_model_name_dict = {
 }
 
 if __name__ == "__main__":
-    dist.init_process_group("nccl")
+    use_ddp = False
+    if use_ddp:
+        dist.init_process_group("nccl")
     world_size = 4
     
     train_transforms = transforms.Compose([
@@ -157,12 +169,17 @@ if __name__ == "__main__":
     root ="./data"
     train_dataset = torchvision.datasets.CIFAR10(root, train=True, transform=train_transforms, download=True)
     test_dataset =  torchvision.datasets.CIFAR10(root, train=False, transform=test_transfomrs, download=True)
+
+    if use_ddp:
+        train_sampler = DistributedSampler(dataset=train_dataset, shuffle=True)
+        train_shuffle= False
+    else:
+        train_sampler = None
+        train_shuffle = True
     
-    train_sampler = DistributedSampler(dataset=train_dataset, shuffle=True)
-    
-    batch_size = 256
+    batch_size = 128
     num_workers = 4
-    train_loader = DataLoader(train_dataset, batch_size=batch_size, num_workers=num_workers, shuffle=False, sampler=train_sampler, pin_memory=False)
+    train_loader = DataLoader(train_dataset, batch_size=batch_size, num_workers=num_workers, shuffle=train_shuffle, sampler=train_sampler, pin_memory=False)
     test_loader = DataLoader(test_dataset, batch_size=batch_size, num_workers=num_workers, shuffle=True, pin_memory=False)
     
     num_classes = 10
@@ -173,26 +190,34 @@ if __name__ == "__main__":
     
     validation_duration = 100
     iteration_down_point = [int(max_iteration*0.5), int(max_iteration*0.75)]
-    channel_list = [
-        (16, 16),
-        (16, 32),
-        (32, 64)
-    ]
-    save_folder = "./result/iteration_test/"
     
+    save_folder = "./result/MobileNetV1/"    
+    model_name = "MobileNetV1"
+
     if not os.path.exists(save_folder):
         os.makedirs(save_folder)
         print(f"{save_folder}가 생성되었습니다")
 
-    #block_list = [BasicBlock, Bottleneck, PreactivationBlock, ResNeXtBlock]
-    block = BasicBlock
-    num_layer = 3
-    use_residual = True
+    if ("resnet" or "resnext")  in model_name.lower():
+        #block_list = [BasicBlock, Bottleneck, PreactivationBlock, ResNeXtBlock]
+        block = ResNeXtBlock
+        num_layer = 3
+        use_residual = True
+        channel_list = [
+            (88, 88),
+            (88, 88),
+            (88, 88)
+        ]
+        model  = ResNetCifar10(block, num_layer, num_classes, use_residual, channel_list).to(device_id)
+        print(model.__class__.__name__)
+
+    if ("mobilenetv1") in model_name.lower():
+        model = MobileNetV1()
+        print(model.__class__.__name__)
     
     #model_name = block_to_model_name_dict[block.__name__] + f"_blocks_per_layer_{num_layer}"
-    model_name = f"iteration-{max_iteration}_batchsize-{batch_size}_worldsize-{world_size}_sampler-true"
     #model = ResNetCifar10(block, num_layer, num_classes, use_residual, channel_list)
-    result = train()
+    result = train(model)
                 
     with open(f"{save_folder}{model_name}.json", 'w') as f:
         json.dump(result, f)        
