@@ -15,7 +15,7 @@ import argparse
 from tqdm import tqdm
 
 from model.resnet import ResNetCifar10, BasicBlock, Bottleneck, PreactivationBlock, ResNeXtBlock
-from model.mobilenet import MobileNetV1
+from model.mobilenet import MobileNetV1, MobileNetV2
 
 import torch.distributed as dist
 import torch.multiprocessing as mp
@@ -157,13 +157,11 @@ if __name__ == "__main__":
         transforms.ToTensor(),
         transforms.Normalize(mean=[0.485, 0.456, 0.406],
                                      std=[0.229, 0.224, 0.225])
-#        transforms.Normalize((0.485, 0.456, 0.406), (0.229, 0.224, 0.225)),
     ])
     test_transfomrs = transforms.Compose([
         transforms.ToTensor(),
         transforms.Normalize(mean=[0.485, 0.456, 0.406],
                                      std=[0.229, 0.224, 0.225])
-#        transforms.Normalize((0.485, 0.456, 0.406), (0.229, 0.224, 0.225)),
     ])
     
     root ="./data"
@@ -191,10 +189,11 @@ if __name__ == "__main__":
     validation_duration = 100
     iteration_down_point = [int(max_iteration*0.5), int(max_iteration*0.75)]
     
-    save_folder = "./result/MobileNetV1/"    
-    model_name = "MobileNetV1"
+    save_folder = "./result/MobileNetV2/"    
+    model_name = "MobileNetV2"
+    save_mode = True
 
-    if not os.path.exists(save_folder):
+    if not os.path.exists(save_folder) and save_mode == True:
         os.makedirs(save_folder)
         print(f"{save_folder}가 생성되었습니다")
 
@@ -214,10 +213,15 @@ if __name__ == "__main__":
     if ("mobilenetv1") in model_name.lower():
         model = MobileNetV1()
         print(model.__class__.__name__)
+
+    if ("mobilenetv2") in model_name.lower():
+        model = MobileNetV2()
+        print(model.__class__.__name__)
     
     #model_name = block_to_model_name_dict[block.__name__] + f"_blocks_per_layer_{num_layer}"
     #model = ResNetCifar10(block, num_layer, num_classes, use_residual, channel_list)
     result = train(model)
-                
-    with open(f"{save_folder}{model_name}.json", 'w') as f:
-        json.dump(result, f)        
+
+    if save_mode:
+        with open(f"{save_folder}{model_name}.json", 'w') as f:
+            json.dump(result, f)        

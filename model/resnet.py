@@ -143,7 +143,7 @@ class PreactivationBlock(nn.Module):
 class ResNeXtBlock(nn.Module):
     expansion = 4
     preactivation = False
-    def __init__(self, in_planes, planes, stride, cardinality=1, use_residual=True):
+    def __init__(self, in_planes, planes, stride, cardinality=2, use_residual=True):
         super(ResNeXtBlock, self).__init__()
 
         #self.planes = int(planes * self.expansion / 2)
